@@ -1,0 +1,16 @@
+<view class="wrap">
+  <view class="card">
+    <view class="title">就着这个景点，随便问</view>
+    <view class="sub">只回答当前景点相关问题，回答都会附出处</view>
+    <textarea class="input" value="{{question}}" bindinput="onInput" maxlength="200" />
+    <view class="btn" bindtap="ask" disabled="{{loading}}">{{loading ? '思考中…' : '问一句'}}</view>
+  </view>
+
+  <view class="card" wx:if="{{answer}}">
+    <view class="output">{{answer}}</view>
+    <view class="source" wx:for="{{sources}}" wx:key="cardId">
+      来源：{{item.title}}（{{item.cardId}}）· {{item.origin}}
+    </view>
+    <view class="note">回答基于景点知识库生成，内容由 AI 生成，仅供参考</view>
+  </view>
+</view>

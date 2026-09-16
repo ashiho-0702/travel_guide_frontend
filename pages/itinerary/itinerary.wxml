@@ -1,0 +1,34 @@
+<view class="wrap" wx:if="{{plan}}">
+  <view class="card">
+    <view class="title">{{plan.summary || '你的行程'}}</view>
+    <view class="sub">行程号 {{plan.itineraryId}}</view>
+  </view>
+
+  <map class="map" latitude="{{mapCenter.latitude}}" longitude="{{mapCenter.longitude}}"
+    markers="{{markers}}" scale="14" show-location="{{false}}" />
+
+  <view class="card">
+    <view class="tags">
+      <text class="tag" wx:for="{{plan.days}}" wx:key="day"
+        bindtap="switchDay" data-index="{{index}}"
+        style="{{activeDay === index ? 'background:#185FA5;color:#fff' : ''}}">第 {{item.day}} 天</text>
+    </view>
+    <view class="sub" wx:if="{{plan.days[activeDay]}}">
+      步行 {{plan.days[activeDay].walkDistance}} 米 · 累计爬升 {{plan.days[activeDay].climbMeters}} 米
+    </view>
+    <view class="slot" wx:for="{{plan.days[activeDay].slots}}" wx:key="start"
+      bindtap="openGuide" data-poi="{{item.poiId}}">
+      <text class="time">{{item.start}}–{{item.end}}</text>
+      <text class="name">{{item.name}}</text>
+      <text class="reason">{{item.reason}}</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="title">说一句就能改</view>
+    <textarea class="input" value="{{reviseText}}" bindinput="onReviseInput"
+      placeholder="例如：第二天太累了 / 下雨了 / 同行的人腿脚不方便" />
+    <view class="btn" bindtap="revise" disabled="{{revising}}">{{revising ? '重排中…' : '重新安排'}}</view>
+    <view class="note" wx:if="{{reviseHint}}">{{reviseHint}}</view>
+  </view>
+</view>

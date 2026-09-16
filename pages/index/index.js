@@ -1,49 +1,59 @@
-// index.js
-const defaultAvatarUrl = 'https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0'
+const api = require('../../services/api')
+const position = require('../../utils/position')
 
 Page({
   data: {
-    motto: 'Hello World',
-    userInfo: {
-      avatarUrl: defaultAvatarUrl,
-      nickName: '',
-    },
-    hasUserInfo: false,
-    canIUseGetUserProfile: wx.canIUse('getUserProfile'),
-    canIUseNicknameComp: wx.canIUse('input.type.nickname'),
+    input: '周末两天，带 60 岁父母，不想爬坡，喜欢古建筑',
+    answer: '',
+    status: '',
+    loading: false
   },
-  bindViewTap() {
-    wx.navigateTo({
-      url: '../logs/logs'
+
+  onInput(e) {
+    this.setData({ input: e.detail.value })
+  },
+
+  // 一句话生成行程（高光①的前半段）
+  generate() {
+    const query = (this.data.input || '').trim()
+    if (!query || this.data.loading) return
+
+    this.setData({ loading: true, answer: '', status: '正在理解你的需求…' })
+    api.event.report([{ type: 'generate', payload: { query } }])
+
+    position.getPosition().then(pos => {
+      let buffer = ''
+      this.task = api.itinerary.generate({ query, position: { lng: pos.lng, lat: pos.lat } }, {
+        onMeta: data => this.setData({ status: '已理解：' + JSON.stringify(data) }),
+        // 注意：高频 setData 会卡，这里每积累一段再刷新（简单节流）
+        onDelta: text => {
+          buffer += text
+          if (buffer.length >= 8) {
+            this.setData({ answer: this.data.answer + buffer })
+            buffer = ''
+          }
+        },
+        onDone: data => {
+          if (buffer) this.setData({ answer: this.data.answer + buffer })
+          wx.setStorageSync('itinerary', data)
+          getApp().globalData.currentItinerary = data
+          this.setData({ loading: false, status: '生成完成，正在进入行程页…' })
+          setTimeout(() => wx.navigateTo({ url: '/pages/itinerary/itinerary' }), 600)
+        },
+        onError: err => {
+          this.setData({
+            loading: false,
+            status: 'AI 暂时不可用（' + (err.message || err.code) + '），已切换预置行程'
+          })
+          // 兜底：直接用预置行程，保证演示能走下去
+          const fallback = { itineraryId: 'it_fallback', days: require('../../services/mock').buildDays(false), summary: '预置兜底行程' }
+          wx.setStorageSync('itinerary', fallback)
+        }
+      })
     })
   },
-  onChooseAvatar(e) {
-    const { avatarUrl } = e.detail
-    const { nickName } = this.data.userInfo
-    this.setData({
-      "userInfo.avatarUrl": avatarUrl,
-      hasUserInfo: nickName && avatarUrl && avatarUrl !== defaultAvatarUrl,
-    })
-  },
-  onInputChange(e) {
-    const nickName = e.detail.value
-    const { avatarUrl } = this.data.userInfo
-    this.setData({
-      "userInfo.nickName": nickName,
-      hasUserInfo: nickName && avatarUrl && avatarUrl !== defaultAvatarUrl,
-    })
-  },
-  getUserProfile(e) {
-    // 推荐使用wx.getUserProfile获取用户信息，开发者每次通过该接口获取用户个人信息均需用户确认，开发者妥善保管用户快速填写的头像昵称，避免重复弹窗
-    wx.getUserProfile({
-      desc: '展示用户信息', // 声明获取用户个人信息后的用途，后续会展示在弹窗中，请谨慎填写
-      success: (res) => {
-        console.log(res)
-        this.setData({
-          userInfo: res.userInfo,
-          hasUserInfo: true
-        })
-      }
-    })
-  },
+
+  onUnload() {
+    this.task && this.task.abort()
+  }
 })

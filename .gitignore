@@ -1,4 +1,7 @@
 project.private.config.json
 .claude/
 node_modules/
+miniprogram_npm/
+package-lock.json
+*.log
 .DS_Store
