@@ -148,13 +148,15 @@ function quickFill() {
   api.parse.query(text).then(parsed => {
     const f = form.value
     f.destinationCity = parsed.destinationCity || f.destinationCity
+    // 解析出的日期若早于今天（如今天是 9/18 说"9月17号"），smartYear 已顺延到明年，直接可用
+    if (parsed.startDate) f.startDate = parsed.startDate
     f.days = parsed.days || f.days
     if (parsed.travelers) f.travelers = parsed.travelers
     if (parsed.preferences && parsed.preferences.length) f.preferences = parsed.preferences
     if (parsed.energyLevel) f.energyLevel = parsed.energyLevel
     if (parsed.transportModes && parsed.transportModes.length) f.transportModes = parsed.transportModes
     f.extraRequirements = parsed.extraRequirements || ''
-    Taro.showToast({ title: '已填好，请确认日期', icon: 'none' })
+    Taro.showToast({ title: parsed.startDate ? '已填好，请确认信息' : '已填好，请选择日期', icon: 'none' })
   }).catch(() => {
     Taro.showToast({ title: '没理解这句话，手动填一下吧', icon: 'none' })
   }).finally(() => { parsing.value = false })

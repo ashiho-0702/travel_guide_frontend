@@ -284,6 +284,7 @@ function parseText(text) {
   const seniors = /父母|老人|长辈|爷爷|奶奶|腿脚/.test(text) ? 2 : 0
   return {
     destinationCity: city,
+    startDate: parseDateFromText(text),
     days,
     travelers: { adults: seniors ? 2 : 1, children: 0, seniors },
     preferences: prefs.length ? prefs : ['culture'],
@@ -291,6 +292,61 @@ function parseText(text) {
     transportModes: ['transit', 'walking'],
     extraRequirements: ''
   }
+}
+
+// ---------- 从一句话里提取出发日期（真实环境由大模型解析，这里做关键词/正则提取） ----------
+const CN_DIGIT = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+function cnNum(s) {
+  // 中文数字 1~31：一、十、十二、二十、二十三…
+  if (/^\d+$/.test(s)) return parseInt(s, 10)
+  if (s === '十') return 10
+  const i = s.indexOf('十')
+  if (i < 0) return CN_DIGIT[s] || 0
+  const tens = i === 0 ? 1 : (CN_DIGIT[s[0]] || 0)
+  const ones = s.length > i + 1 ? (CN_DIGIT[s[i + 1]] || 0) : 0
+  return tens * 10 + ones
+}
+function pad2(n) { return n < 10 ? '0' + n : '' + n }
+function todayStr() {
+  const d = new Date() // 本地时区，避免 UTC 偏一天
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+}
+function fmtDate(y, m, d) { return y + '-' + pad2(m) + '-' + pad2(d) }
+function addDaysLocal(baseStr, n) {
+  const p = baseStr.split('-').map(Number)
+  const d = new Date(p[0], p[1] - 1, p[2])
+  d.setDate(d.getDate() + n)
+  return fmtDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
+}
+// 月/日确定后选年份：今年这一天还没过就用今年，过了自动顺延一年
+function smartYear(m, d) {
+  if (!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return ''
+  const y = new Date().getFullYear()
+  const candidate = fmtDate(y, m, d)
+  return candidate >= todayStr() ? candidate : fmtDate(y + 1, m, d)
+}
+function parseDateFromText(text) {
+  if (!text) return ''
+  // 2026-10-01 / 2026年10月1日 / 2026.10.1 / 2026/10/1
+  const iso = text.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*[日号]?/)
+  if (iso) return smartYear(parseInt(iso[2], 10), parseInt(iso[3], 10))
+  // 9月17日 / 9月17号 / 九月十七号 / 09月17 (允许省略"日")
+  const md = text.match(/([一二两三四五六七八九十\d]{1,3})\s*月\s*([一二两三四五六七八九十\d]{1,3})\s*[日号]?/)
+  if (md) {
+    const m = cnNum(md[1]); const d = cnNum(md[2])
+    if (m && d) return smartYear(m, d)
+  }
+  // 相对日期
+  if (/大后天/.test(text)) return addDaysLocal(todayStr(), 3)
+  if (/后天/.test(text)) return addDaysLocal(todayStr(), 2)
+  if (/明天/.test(text)) return addDaysLocal(todayStr(), 1)
+  if (/今天|今晚/.test(text)) return todayStr()
+  // 周末 → 最近的一个周六（今天是周六就算今天）
+  if (/周末|周六|星期六|礼拜六/.test(text)) {
+    const diff = (6 - new Date().getDay() + 7) % 7
+    return addDaysLocal(todayStr(), diff)
+  }
+  return ''
 }
 
 function delayer(fn, ms) {
