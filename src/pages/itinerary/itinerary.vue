@@ -110,7 +110,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import Taro, { useLoad, useShow, useUnload } from '@tarojs/taro'
+import Taro, { useLoad, useDidShow, useUnload } from '@tarojs/taro'
 import api from '../../services/api'
 import AuthMask from '../../components/AuthMask.vue'
 
@@ -167,7 +167,7 @@ useLoad(options => {
 })
 
 // 回前台：先查状态，运行中则从最后事件恢复订阅（文档 2.4 / 8.2）
-useShow(() => {
+useDidShow(() => {
   if (!tripId.value) return
   api.trips.status(tripId.value).then(s => {
     applyStatus(s)

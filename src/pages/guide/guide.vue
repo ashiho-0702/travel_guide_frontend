@@ -29,7 +29,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import Taro, { useLoad, useShow, useUnload } from '@tarojs/taro'
+import Taro, { useLoad, useDidShow, useUnload } from '@tarojs/taro'
 import api from '../../services/api'
 import { requireLogin } from '../../utils/auth'
 import AuthMask from '../../components/AuthMask.vue'
@@ -58,7 +58,7 @@ useLoad(options => {
 })
 
 // tab 再次切入时检查行程页带过来的点位（switchTab 不触发 onLoad，只触发 onShow）
-useShow(() => {
+useDidShow(() => {
   if (!pois.value.length) return
   const pending = Taro.getStorageSync('pendingPoiId')
   if (pending) { Taro.removeStorageSync('pendingPoiId'); play(pending) }

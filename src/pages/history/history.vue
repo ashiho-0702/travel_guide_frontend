@@ -30,7 +30,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import Taro, { useShow } from '@tarojs/taro'
+import Taro, { useDidShow } from '@tarojs/taro'
 import api from '../../services/api'
 
 const items = ref([])
@@ -39,7 +39,7 @@ const loading = ref(false)
 const loadingMore = ref(false)
 
 // 每次切到本页都刷新（新建/删除后保持最新）
-useShow(() => refresh())
+useDidShow(() => refresh())
 
 function refresh() {
   loading.value = true
