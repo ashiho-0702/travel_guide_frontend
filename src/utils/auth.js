@@ -1,5 +1,6 @@
 // 登录工具：微信一键授权的底层实现
-// 流程：Taro.login() 拿临时 code → POST /api/auth/login 换 token → 存本地
+// 流程：Taro.login() 拿临时 code → POST /api/v1/auth/wechat-login 换 accessToken → 存本地
+// 后端 v1.0：token 有效期 expiresIn 秒，过期后接口返回 401 AUTH_REQUIRED，前端重新登录
 import { reactive } from 'vue'
 import Taro from '@tarojs/taro'
 import api from '../services/api'
@@ -39,14 +40,17 @@ export function currentUser() {
   return Taro.getStorageSync('user') || null
 }
 
-// 静默登录：调微信登录接口换 code，再向后端换 token
+// 静默登录：调微信登录接口换 code，再向后端换 accessToken
 export function silentLogin() {
   return new Promise((resolve, reject) => {
     Taro.login({
       success: res => {
         if (!res.code) return reject({ message: 'wx.login 未返回 code' })
         api.auth.login(res.code).then(data => {
-          Taro.setStorageSync('token', data.token)
+          const expiresIn = (data && data.expiresIn) || 7200
+          Taro.setStorageSync('token', data.accessToken)
+          // 存过期时间，提前 5 分钟视为过期，避免边界报 401
+          Taro.setStorageSync('tokenExpiresAt', Date.now() + (expiresIn - 300) * 1000)
           Taro.setStorageSync('user', data.user || null)
           resolve(data)
         }).catch(reject)
@@ -54,6 +58,11 @@ export function silentLogin() {
       fail: reject
     })
   })
+}
+
+// token 是否仍在有效期内
+export function isTokenValid() {
+  return isLoggedIn() && Taro.getStorageSync('tokenExpiresAt') > Date.now()
 }
 
 // 兜底用：有 token 直接过，没有就静默登录；失败不阻塞主流程（游客模式）

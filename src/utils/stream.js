@@ -1,6 +1,7 @@
-// NDJSON 流式解析器（纯 JS，从原生版原样迁移，零改动）
-// 后端按契约 v1 每行发一条 JSON：{"type":"delta","text":"..."}
-// 关键点：网络分块会切断 UTF-8 中文（一个汉字 3 字节），所以必须在字节层面按 0x0A 切行，再整行解码
+// SSE（text/event-stream）解析器
+// 后端 v1.0：事件按空行分隔，事件内是 id:/event:/data: 三种行
+// 关键点（文档 8.3）：网络分块会切断 UTF-8 中文（一个汉字 3 字节），
+// 必须在字节层面攒到换行再整行解码；只有完整的 data 才能进 JSON.parse
 function decodeUtf8(bytes) {
   let out = ''
   let i = 0
@@ -28,7 +29,7 @@ function decodeUtf8(bytes) {
       out += String.fromCharCode(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff))
       i += 4
     } else {
-      i += 1 // 非法字节或跨包残留，跳过，等下一块补齐
+      i += 1 // 跨包残留的不完整字节，等下一块补齐
     }
   }
   return out
@@ -47,32 +48,74 @@ function concat(a, b) {
   return out
 }
 
-// 返回 { push(ArrayBuffer), reset() }
-function createNdjsonParser(onMessage) {
+// 返回 { push(ArrayBuffer), reset(), lastEventId }
+// onEvent({ id, event, data })——data 已 JSON.parse，解析失败时 data 为原始字符串
+function createSseParser(onEvent) {
   let buf = new Uint8Array(0)
+  let lines = []        // 当前事件攒到的行（原始字节）
+  let lineBytes = []    // 当前行攒到的字节（中文可能被切块切断）
+  let lastId = ''
+
+  function finishLine() {
+    if (lineBytes.length) {
+      lines.push(decodeUtf8(new Uint8Array(lineBytes)))
+      lineBytes = []
+    }
+  }
+
+  function finishEvent() {
+    finishLine()
+    if (!lines.length) return
+    let id = lastId
+    let type = 'message'
+    let dataText = ''
+    lines.forEach(line => {
+      if (line.indexOf('id:') === 0) id = line.slice(3).trim()
+      else if (line.indexOf('event:') === 0) type = line.slice(6).trim()
+      else if (line.indexOf('data:') === 0) {
+        if (dataText) dataText += '\n'
+        dataText += line.slice(5).trim()
+      }
+      // 其他行（注释、未知字段）按规范忽略
+    })
+    lines = []
+    if (!dataText) return // 纯心跳空壳直接丢弃
+    let data = dataText
+    try {
+      data = JSON.parse(dataText)
+    } catch (e) {
+      console.warn('[stream] 事件 data 不是合法 JSON：', dataText)
+    }
+    lastId = id
+    onEvent({ id, event: type, data })
+  }
 
   function push(chunk) {
     buf = concat(buf, toBytes(chunk))
-    let start = 0
+    let prevNewline = false
     for (let i = 0; i < buf.length; i++) {
-      if (buf[i] !== 0x0a) continue // 0x0A = \n
-      const line = decodeUtf8(buf.slice(start, i)).trim()
-      start = i + 1
-      if (!line) continue
-      try {
-        onMessage(JSON.parse(line))
-      } catch (e) {
-        console.warn('[stream] 无法解析的流内消息：', line)
+      const b = buf[i]
+      if (b === 0x0d) continue // 忽略 \r
+      if (b === 0x0a) {
+        finishLine()
+        // 连续两个换行 = 一个事件结束（跨块也不丢：prevNewline 是状态不是字节）
+        if (prevNewline) finishEvent()
+        prevNewline = true
+      } else {
+        prevNewline = false
+        lineBytes.push(b)
       }
     }
-    buf = buf.slice(start) // 留下不完整的尾巴
+    buf = new Uint8Array(0) // 字节已全部落到 lineBytes/lines，缓冲清空
   }
 
   function reset() {
     buf = new Uint8Array(0)
+    lines = []
+    lineBytes = []
   }
 
-  return { push, reset }
+  return { push, reset, get lastEventId() { return lastId } }
 }
 
-export { createNdjsonParser, decodeUtf8 }
+export { createSseParser, decodeUtf8 }

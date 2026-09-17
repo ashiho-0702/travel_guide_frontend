@@ -3,6 +3,7 @@ export default {
   pages: [
     'pages/index/index',
     'pages/itinerary/itinerary',
+    'pages/history/history',
     'pages/guide/guide',
     'pages/chat/chat'
   ],
@@ -20,6 +21,7 @@ export default {
     borderStyle: 'black',
     list: [
       { pagePath: 'pages/index/index', text: '规划' },
+      { pagePath: 'pages/history/history', text: '历史' },
       { pagePath: 'pages/guide/guide', text: '讲解' }
     ]
   },
