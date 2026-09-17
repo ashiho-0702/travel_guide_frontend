@@ -36,6 +36,7 @@
       </view>
       <view class="note" v-if="reviseHint">{{ reviseHint }}</view>
     </view>
+    <AuthMask />
   </view>
 </template>
 
@@ -43,6 +44,8 @@
 import { ref, computed } from 'vue'
 import Taro, { useLoad } from '@tarojs/taro'
 import api from '../../services/api'
+import { requireLogin } from '../../utils/auth'
+import AuthMask from '../../components/AuthMask.vue'
 
 const plan = ref(null)
 const markers = ref([])
@@ -91,11 +94,14 @@ function switchDay(idx) {
   renderPlan(plan.value)
 }
 
-// 对话式重排：高光①
+// 对话式重排：高光①——未登录先弹授权
 function revise() {
   const instruction = (reviseText.value || '').trim()
   if (!instruction || revising.value) return
+  requireLogin(() => startRevise(instruction))
+}
 
+function startRevise(instruction) {
   revising.value = true
   reviseHint.value = '正在重排…'
   let buffer = ''

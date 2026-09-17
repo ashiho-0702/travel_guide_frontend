@@ -142,3 +142,33 @@ page {
   font-size: 30rpx;
   line-height: 1.8;
 }
+
+/* ---------- 全局授权弹层（AuthMask 组件） ---------- */
+.auth-mask {
+  position: fixed;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.auth-card {
+  width: 560rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 48rpx 40rpx 40rpx;
+  text-align: center;
+}
+.auth-logo { font-size: 72rpx; }
+.auth-title { font-size: 36rpx; font-weight: 600; margin: 16rpx 0 8rpx; color: #333; }
+.auth-desc { font-size: 26rpx; color: #888780; margin-bottom: 40rpx; }
+.auth-btn {
+  background: #185FA5;
+  color: #fff;
+  font-size: 30rpx;
+  padding: 22rpx 0;
+  border-radius: 44rpx;
+}
+.auth-btn.disabled { opacity: 0.6; }
+.auth-skip { margin-top: 24rpx; font-size: 26rpx; color: #999; }

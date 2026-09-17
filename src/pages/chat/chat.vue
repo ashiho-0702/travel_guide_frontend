@@ -16,6 +16,7 @@
       </view>
       <view class="note">回答基于景点知识库生成，内容由 AI 生成，仅供参考</view>
     </view>
+    <AuthMask />
   </view>
 </template>
 
@@ -23,6 +24,8 @@
 import { ref } from 'vue'
 import { useLoad } from '@tarojs/taro'
 import api from '../../services/api'
+import { requireLogin } from '../../utils/auth'
+import AuthMask from '../../components/AuthMask.vue'
 
 const poiId = ref('')
 const question = ref('这个榫卯为什么不用钉子？')
@@ -34,10 +37,14 @@ useLoad(options => {
   if (options && options.poiId) poiId.value = options.poiId
 })
 
-// RAG 追问：高光②
+// RAG 追问：高光②——未登录先弹授权
 function ask() {
   const q = (question.value || '').trim()
   if (!q || loading.value) return
+  requireLogin(() => startAsk(q))
+}
+
+function startAsk(q) {
   loading.value = true
   answer.value = ''
   sources.value = []

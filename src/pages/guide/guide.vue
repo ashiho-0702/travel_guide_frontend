@@ -23,6 +23,7 @@
         <text class="tag" v-for="t in item.tags" :key="t">{{ t }}</text>
       </view>
     </view>
+    <AuthMask />
   </view>
 </template>
 
@@ -30,6 +31,8 @@
 import { ref } from 'vue'
 import Taro, { useLoad, useShow, useUnload } from '@tarojs/taro'
 import api from '../../services/api'
+import { requireLogin } from '../../utils/auth'
+import AuthMask from '../../components/AuthMask.vue'
 
 const pois = ref([])
 const current = ref(null)   // 当前讲解的 POI
@@ -70,11 +73,13 @@ function chooseDuration(d) {
   if (current.value) loadGuide()
 }
 
-// 讲解触发：模拟「我已到达此处」（演示主力）
+// 讲解触发：模拟「我已到达此处」（演示主力）——未登录先弹授权
 function play(poiId) {
-  const poi = pois.value.find(p => p.poiId === poiId)
-  current.value = poi
-  loadGuide()
+  requireLogin(() => {
+    const poi = pois.value.find(p => p.poiId === poiId)
+    current.value = poi
+    loadGuide()
+  })
 }
 
 function loadGuide() {
