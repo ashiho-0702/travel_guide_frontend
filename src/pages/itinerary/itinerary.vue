@@ -122,6 +122,8 @@ function revise() {
 
 // 走到景点 → 打开讲解
 function openGuide(poiId) {
-  Taro.navigateTo({ url: `/pages/guide/guide?poiId=${poiId}` })
+  // guide 在 tabBar 里，navigateTo 会报 timeout；改 switchTab + storage 传参
+  Taro.setStorageSync('pendingPoiId', poiId)
+  Taro.switchTab({ url: '/pages/guide/guide' })
 }
 </script>

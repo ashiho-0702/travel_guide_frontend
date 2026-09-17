@@ -28,7 +28,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import Taro, { useLoad, useUnload } from '@tarojs/taro'
+import Taro, { useLoad, useShow, useUnload } from '@tarojs/taro'
 import api from '../../services/api'
 
 const pois = ref([])
@@ -48,9 +48,17 @@ let timer = null
 useLoad(options => {
   api.poi.list().then(list => {
     pois.value = list
-    // 从行程页点进来时直接播这个点位的讲解
+    const pending = Taro.getStorageSync('pendingPoiId')
     if (options && options.poiId) play(options.poiId)
+    else if (pending) { Taro.removeStorageSync('pendingPoiId'); play(pending) }
   })
+})
+
+// tab 再次切入时检查行程页带过来的点位（switchTab 不触发 onLoad，只触发 onShow）
+useShow(() => {
+  if (!pois.value.length) return
+  const pending = Taro.getStorageSync('pendingPoiId')
+  if (pending) { Taro.removeStorageSync('pendingPoiId'); play(pending) }
 })
 
 useUnload(() => {

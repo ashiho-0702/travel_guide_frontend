@@ -62,7 +62,11 @@ function generate() {
         Taro.setStorageSync('itinerary', data)
         status.value = '生成完成，正在进入行程页…'
         loading.value = false
-        setTimeout(() => Taro.navigateTo({ url: '/pages/itinerary/itinerary' }), 600)
+        setTimeout(() => Taro.navigateTo({
+          url: '/pages/itinerary/itinerary',
+          // 极少数情况下开发者工具会抽风报 timeout，用 reLaunch 兜底
+          fail: () => Taro.reLaunch({ url: '/pages/itinerary/itinerary' })
+        }), 600)
       },
       onError: err => {
         loading.value = false
