@@ -183,7 +183,7 @@ function mockRequest(path, method, data) {
       return null
     })
   }
-  // 详情：GET /api/v1/trips/{id}
+  // 详情：GET /api/v1/trips/{id}，返回 TripDetail 包装层（文档 5.3）
   return delayer(() => {
     if (t.status === 'queued' || t.status === 'running') {
       return Promise.reject({ code: 'TRIP_NOT_READY', message: '结果尚未完成，请先查询状态接口' })
@@ -194,7 +194,19 @@ function mockRequest(path, method, data) {
     if (t.status === 'canceled') {
       return { id: t.id, title: t.title, status: 'canceled', request: t.request, result: null, error: null, createdAt: t.createdAt, updatedAt: now() }
     }
-    return t.detail
+    return {
+      id: t.id,
+      title: t.title,
+      status: 'completed',
+      stage: 'saving',
+      progressPercent: 100,
+      request: t.request,
+      result: t.detail,
+      error: null,
+      createdAt: t.createdAt,
+      updatedAt: now(),
+      completedAt: now()
+    }
   })
 }
 

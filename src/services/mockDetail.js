@@ -36,9 +36,11 @@ const SOURCES = [
 ]
 
 function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00+08:00')
-  d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
+  // 用本地时区构造日期，避免 toISOString 按 UTC 取值导致日期早一天
+  const parts = dateStr.split('-').map(Number)
+  const d = new Date(parts[0], parts[1] - 1, parts[2] + n)
+  const p = x => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 function transitModeOf(request) {
