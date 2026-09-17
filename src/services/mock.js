@@ -34,6 +34,13 @@ function delayer(fn, ms) {
 }
 
 function mockRequest(path) {
+  // 登录：返回模拟 token（真实环境由后端 wx.login code 换 openid 签发）
+  if (path.indexOf('/api/auth/login') === 0) {
+    return delayer(() => ({
+      token: 'mock_token_' + Date.now(),
+      user: { id: 1, openid: 'mock_openid_001', nickname: null, avatarUrl: null }
+    }))
+  }
   if (path.indexOf('/api/poi/list') === 0) return delayer(() => POIS)
   if (path.indexOf('/api/guide') === 0) {
     const poiId = (path.match(/poiId=([^&]+)/) || [])[1] || '05'
