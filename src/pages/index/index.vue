@@ -224,13 +224,25 @@ function doCreate() {
 
   api.trips.create(payload).then(res => {
     Taro.setStorageSync('currentTripId', res.tripId)
-    Taro.navigateTo({
-      url: `/pages/itinerary/itinerary?tripId=${res.tripId}`,
-      fail: () => Taro.reLaunch({ url: `/pages/itinerary/itinerary?tripId=${res.tripId}` })
-    })
+    goItinerary(res.tripId)
   }).catch(e => {
     Taro.showToast({ title: e.message || '创建失败，请重试', icon: 'none' })
   }).finally(() => { submitting.value = false })
+}
+
+// 跳转生成页：加锁防连点；navigateTo 失败（常见为上一次路由尚未结束）时
+// 等 400ms 再用 reLaunch 兜底——立即补跳会与在途路由撞车，触发 routeDone webviewId 错乱
+let routing = false
+function goItinerary(tripId) {
+  if (routing) return
+  routing = true
+  const url = `/pages/itinerary/itinerary?tripId=${tripId}`
+  const unlock = () => setTimeout(() => { routing = false }, 600)
+  Taro.navigateTo({
+    url,
+    success: unlock,
+    fail: () => setTimeout(() => Taro.reLaunch({ url, complete: unlock }), 400)
+  })
 }
 </script>
 
