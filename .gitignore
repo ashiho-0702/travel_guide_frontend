@@ -2,6 +2,7 @@ project.private.config.json
 .claude/
 node_modules/
 dist/
+.swc/
 miniprogram_npm/
 package-lock.json
 *.log
