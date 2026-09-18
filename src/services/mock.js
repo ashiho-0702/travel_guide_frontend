@@ -273,8 +273,9 @@ function parseText(text) {
   text = text || ''
   const cities = ['杭州', '北京', '苏州', '南京', '西安', '成都', '广州', '厦门']
   const city = cities.find(c => text.indexOf(c) >= 0) || '杭州'
-  const dayMatch = text.match(/(\d+)\s*天/)
-  const days = dayMatch ? Math.min(15, Math.max(1, parseInt(dayMatch[1], 10))) : 2
+  // 天数：支持中文数字（玩四天/两天）和阿拉伯数字（玩4天）
+  const dayMatch = text.match(/([一二两三四五六七八九十\d]{1,3})\s*天/)
+  const days = dayMatch ? Math.min(15, Math.max(1, cnNum(dayMatch[1]) || 2)) : 2
   const prefs = []
   if (/古|历史|人文|寺|博物馆/.test(text)) prefs.push('culture')
   if (/吃|美食|菜|小吃/.test(text)) prefs.push('food')
@@ -290,8 +291,33 @@ function parseText(text) {
     preferences: prefs.length ? prefs : ['culture'],
     energyLevel: /老人|父母|长辈|腿脚|轻松|不赶/.test(text) ? 'easy' : 'medium',
     transportModes: ['transit', 'walking'],
+    budgetCny: parseBudgetFromText(text),
     extraRequirements: ''
   }
+}
+
+// ---------- 从一句话里提取预算（预算2000 / 预算两千左右 / 2000元以内） ----------
+function cnAmount(s) {
+  // 中文金额：支持 两千 / 三千五 / 两千五百 等组合
+  if (/^\d+(\.\d+)?$/.test(s)) return parseFloat(s)
+  let n = 0
+  const qian = s.split('千')
+  if (qian.length > 1) { n += (qian[0] ? cnNum(qian[0]) : 1) * 1000; s = qian[1] || '' }
+  const bai = s.split('百')
+  if (bai.length > 1) { n += (bai[0] ? cnNum(bai[0]) : 1) * 100; s = bai[1] || '' }
+  if (s) n += cnNum(s)
+  return n
+}
+function parseBudgetFromText(text) {
+  if (!text) return 0
+  const num = '[一二两三四五六七八九十百千\\d]+(?:\\.\\d+)?'
+  // 优先"预算/花费 + 数字"：预算2000、预算两千左右、花费1500元
+  let m = text.match(new RegExp('(?:预算|花费|控制在?)\\s*(' + num + ')\\s*(?:元|块|左右|以内|之内|上下)*'))
+  if (m) return Math.round(cnAmount(m[1]))
+  // 次选"数字 + 元/块"：2000元以内、大概1500块
+  m = text.match(new RegExp('(' + num + ')\\s*(?:元|块)\\s*(?:以内|左右|之内)?'))
+  if (m) return Math.round(cnAmount(m[1]))
+  return 0
 }
 
 // ---------- 从一句话里提取出发日期（真实环境由大模型解析，这里做关键词/正则提取） ----------

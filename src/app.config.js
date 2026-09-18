@@ -1,6 +1,7 @@
 // 全局页面注册与窗口/tabBar 配置（对应原生 app.json）
 export default {
   pages: [
+    'pages/home/home',
     'pages/index/index',
     'pages/itinerary/itinerary',
     'pages/history/history',
@@ -20,7 +21,7 @@ export default {
     backgroundColor: '#ffffff',
     borderStyle: 'black',
     list: [
-      { pagePath: 'pages/index/index', text: '规划' },
+      { pagePath: 'pages/home/home', text: '首页' },
       { pagePath: 'pages/history/history', text: '历史' },
       { pagePath: 'pages/guide/guide', text: '讲解' }
     ]

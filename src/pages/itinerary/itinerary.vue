@@ -327,7 +327,8 @@ function retry() {
 }
 
 function goHome() {
-  Taro.switchTab({ url: '/pages/index/index' })
+  // 表单页已移出 tabBar，改用 navigateTo（tab 页才需要 switchTab）
+  Taro.navigateTo({ url: '/pages/index/index' })
 }
 </script>
 

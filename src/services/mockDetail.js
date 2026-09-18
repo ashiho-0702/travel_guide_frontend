@@ -49,8 +49,18 @@ function transitModeOf(request) {
 
 export function buildMockDetail(request) {
   const days = []
-  let totalCost = 0
+  const hasBudget = typeof request.totalBudgetCny === 'number' && request.totalBudgetCny > 0
 
+  // 第一遍：按模板原价累计总费用
+  let rawTotal = 0
+  for (let i = 0; i < request.days; i++) {
+    const tpl = DAY_TEMPLATES[i % DAY_TEMPLATES.length]
+    rawTotal += tpl.items.reduce((sum, it) => sum + it.estimatedCostCny, 0)
+  }
+  // 用户给了预算且原价超支：按比例压缩各项费用（门票免费项保持 0），让方案贴合预算
+  const factor = hasBudget && rawTotal > request.totalBudgetCny ? request.totalBudgetCny / rawTotal : 1
+
+  let totalCost = 0
   for (let i = 0; i < request.days; i++) {
     const tpl = DAY_TEMPLATES[i % DAY_TEMPLATES.length]
     const items = tpl.items.map((it, idx) => ({
@@ -62,7 +72,7 @@ export function buildMockDetail(request) {
       address: it.address,
       reason: it.reason,
       tips: it.tips,
-      estimatedCostCny: it.estimatedCostCny,
+      estimatedCostCny: Math.round(it.estimatedCostCny * factor),
       locationStatus: 'resolved',
       location: { lat: it.location.lat, lng: it.location.lng },
       sourceIds: it.sourceIds
@@ -100,11 +110,11 @@ export function buildMockDetail(request) {
     })
   }
 
-  const hasBudget = typeof request.totalBudgetCny === 'number' && request.totalBudgetCny > 0
   return {
     destination: { city: request.destinationCity, province: request.destinationCity === '杭州' ? '浙江省' : '' },
     coordinateSystem: 'GCJ-02',
-    overview: `为你安排了 ${request.destinationCity} ${request.days} 天行程，已按「${request.energyLevel}」体力档位控制每日节奏。`,
+    overview: `为你安排了 ${request.destinationCity} ${request.days} 天行程，已按「${request.energyLevel}」体力档位控制每日节奏。` +
+      (hasBudget && factor < 1 ? `已按预算 ${request.totalBudgetCny} 元压缩各项开支。` : ''),
     generatedAt: new Date().toISOString(),
     budgetSummary: {
       currency: 'CNY',
