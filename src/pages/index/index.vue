@@ -2,7 +2,7 @@
   <view class="fm-shell">
     <!-- 表单区：放进 scroll-view 独立滚动，底栏不悬浮，内容永远不会滑到底栏下面
          （input 是原生组件层级最高，普通 view 盖不住，只能靠布局隔离） -->
-    <scroll-view class="fm-scroll" scroll-y>
+    <scroll-view class="fm-scroll" :scroll-y="true">
       <view class="fm-wrap">
     <!-- 一句话输入（创新点：解析后预填表单，后端 /api/parse 待补，mock 先行） -->
     <view class="fm-card">
@@ -337,7 +337,8 @@ function goItinerary(tripId) {
   flex-direction: column;
   background: #e9f5f0;
 }
-.fm-scroll { flex: 1; min-height: 0; }
+/* 小程序 scroll-view 对 flex 支持不完整：必须 height:0 + flex:1 才能被 flex 撑开并获得滚动 */
+.fm-scroll { flex: 1; height: 0; }
 .fm-wrap {
   background: #e9f5f0;
   padding: 24rpx 24rpx 40rpx;
