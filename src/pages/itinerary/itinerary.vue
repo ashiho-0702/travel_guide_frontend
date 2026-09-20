@@ -1,19 +1,10 @@
 <template>
   <view class="wrap">
-    <!-- ========== 阶段一：生成进度 ========== -->
-    <view v-if="phase === 'running'">
+    <!-- ========== 加载中 ========== -->
+    <view v-if="phase === 'loading'">
       <view class="card center-card">
         <view class="big-icon">⏳</view>
-        <view class="title">{{ statusText }}</view>
-        <view class="progress-wrap">
-          <view class="progress-bar">
-            <view class="progress-inner" :style="{ width: percent + '%' }"></view>
-          </view>
-          <view class="percent">{{ percent }}%</view>
-        </view>
-        <view class="note">{{ message || '正在准备…' }}</view>
-        <view class="btn danger" @tap="cancelTask" :class="{ disabled: canceling }">取消生成</view>
-        <view class="note">可以切到后台，回来会自动恢复进度</view>
+        <view class="title">正在加载行程…</view>
       </view>
     </view>
 
@@ -21,20 +12,11 @@
     <view v-if="phase === 'failed'">
       <view class="card center-card">
         <view class="big-icon">😵</view>
-        <view class="title">生成失败</view>
+        <view class="title">加载失败</view>
         <view class="note">{{ errorMsg }}</view>
-        <view class="btn" @tap="retry" :class="{ disabled: submitting }">
-          {{ submitting ? '创建中…' : '用原需求重新生成' }}
+        <view class="btn" @tap="reload" :class="{ disabled: submitting }">
+          {{ submitting ? '加载中…' : '重新加载' }}
         </view>
-        <view class="btn ghost" @tap="goHome">返回修改需求</view>
-      </view>
-    </view>
-
-    <!-- 取消态 -->
-    <view v-if="phase === 'canceled'">
-      <view class="card center-card">
-        <view class="big-icon">🚫</view>
-        <view class="title">已取消生成</view>
         <view class="btn ghost" @tap="goHome">返回重新规划</view>
       </view>
     </view>
@@ -110,19 +92,14 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import Taro, { useLoad, useDidShow, useUnload } from '@tarojs/taro'
+import Taro, { useLoad } from '@tarojs/taro'
 import api from '../../services/api'
 import AuthMask from '../../components/AuthMask.vue'
 
 const tripId = ref('')
-const phase = ref('running') // running | done | failed | canceled
-const status = ref('queued')
-const stage = ref('')
-const percent = ref(0)
-const message = ref('')
-const errorMsg = ref('')
-const canceling = ref(false)
+const phase = ref('loading') // loading | done | failed
 const submitting = ref(false)
+const errorMsg = ref('')
 
 const detail = ref(null)
 const activeDay = ref(0)
@@ -130,23 +107,9 @@ const markers = ref([])
 const polylines = ref([])
 const mapCenter = ref({ latitude: 30.25, longitude: 120.15 })
 
-let subscriber = null
-let pollTimer = null
-let lastEventId = ''
-
-const STAGE_TEXT = {
-  validating: '正在校验需求', retrieving: '正在搜集资料', generating: '正在生成行程',
-  verifying: '正在核对信息', geocoding: '正在定位景点', routing: '正在规划路线',
-  budgeting: '正在汇总预算', saving: '正在保存结果'
-}
-const statusText = computed(() => {
-  if (status.value === 'queued') return '排队中，马上开始…'
-  return STAGE_TEXT[stage.value] || '正在生成'
-})
-
 const currentDay = computed(() => {
-  if (!detail.value) return null
-  return detail.value.result.days[activeDay.value] || detail.value.result.days[0]
+  const days = (detail.value && detail.value.result && detail.value.result.days) || []
+  return days[activeDay.value] || days[0] || null
 })
 const currentItems = computed(() => (currentDay.value && currentDay.value.items) || [])
 const dayHasRouteIssue = computed(() =>
@@ -160,116 +123,42 @@ function typeIcon(t) {
 useLoad(options => {
   tripId.value = (options && options.tripId) || Taro.getStorageSync('currentTripId') || ''
   if (!tripId.value) {
-    Taro.showToast({ title: '缺少行程任务，先去规划', icon: 'none' })
+    Taro.showToast({ title: '缺少行程，先去规划', icon: 'none' })
     return
   }
-  startWatch()
+  loadDetail()
 })
 
-// 回前台：先查状态，运行中则从最后事件恢复订阅（文档 2.4 / 8.2）
-useDidShow(() => {
-  if (!tripId.value) return
-  api.trips.status(tripId.value).then(s => {
-    applyStatus(s)
-    if (s.status === 'queued' || s.status === 'running') resubscribe()
-  }).catch(e => {
-    if (e.code === 'TRIP_NOT_FOUND') Taro.showToast({ title: '行程已被删除', icon: 'none' })
-  })
-})
-
-useUnload(() => {
-  stopWatch()
-})
-
-// ---------- 订阅事件流，失败降级轮询 ----------
-function startWatch() {
-  api.trips.status(tripId.value).then(applyStatus).catch(() => {})
-  subscribe()
-}
-
-function subscribe() {
-  stopWatch()
-  subscriber = api.trips.events(tripId.value, lastEventId, {
-    onEvent: ev => onEvent(ev),
-    onError: () => startPolling() // 事件流不可用 → 3 秒轮询（文档 6.4）
-  })
-}
-
-function resubscribe() {
-  if (subscriber) return // 还在订阅中就不重复
-  subscribe()
-}
-
-function onEvent(ev) {
-  if (ev.event === 'progress') {
-    status.value = ev.data.status || 'running'
-    stage.value = ev.data.stage || stage.value
-    percent.value = ev.data.progressPercent || percent.value
-    message.value = ev.data.message || ''
-  } else if (ev.event === 'completed') {
-    stopWatch()
-    loadDetail()
-  } else if (ev.event === 'failed') {
-    stopWatch()
-    phase.value = 'failed'
-    status.value = 'failed'
-    errorMsg.value = (ev.data.error && ev.data.error.message) || '生成失败，请稍后重试'
-  } else if (ev.event === 'canceled') {
-    stopWatch()
-    phase.value = 'canceled'
-    status.value = 'canceled'
-  }
-  // heartbeat / 未知事件类型：忽略（文档 8.3）
-}
-
-// 断流兜底：每 3 秒查一次状态，直到终态
-function startPolling() {
-  if (pollTimer) return
-  pollTimer = setInterval(() => {
-    api.trips.status(tripId.value).then(s => {
-      applyStatus(s)
-      if (s.status === 'completed') { stopWatch(); loadDetail() }
-      else if (s.status === 'failed') {
-        stopWatch(); phase.value = 'failed'
-        errorMsg.value = (s.error && s.error.message) || '生成失败'
-      } else if (s.status === 'canceled') { stopWatch(); phase.value = 'canceled' }
-    }).catch(() => {})
-  }, 3000)
-}
-
-function applyStatus(s) {
-  status.value = s.status
-  stage.value = s.stage || stage.value
-  percent.value = s.progressPercent || percent.value
-  message.value = s.message || ''
-  if (s.status === 'completed') loadDetail()
-  else if (s.status === 'failed') {
-    phase.value = 'failed'
-    errorMsg.value = (s.error && s.error.message) || '生成失败'
-  } else if (s.status === 'canceled') phase.value = 'canceled'
-}
-
-function stopWatch() {
-  if (subscriber) { subscriber.abort(); subscriber = null }
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
-
-// ---------- 详情 ----------
+// ---------- 详情：GET /api/trip/{id} ----------
 function loadDetail() {
+  phase.value = 'loading'
   api.trips.detail(tripId.value).then(d => {
     detail.value = d
+    // 库里 result 字段可空（生成中/生成失败的历史记录），无结果时给明确提示而不是白屏
+    if (!d || !d.result || !Array.isArray(d.result.days) || !d.result.days.length) {
+      phase.value = 'failed'
+      errorMsg.value = '这份行程还没有生成结果'
+      return
+    }
     phase.value = 'done'
     renderDay(0)
   }).catch(e => {
-    if (e.code === 'TRIP_NOT_READY') { phase.value = 'running'; resubscribe(); return }
     phase.value = 'failed'
     errorMsg.value = e.message || '读取结果失败'
   })
 }
 
+function reload() {
+  if (submitting.value) return
+  submitting.value = true
+  loadDetail()
+  submitting.value = false
+}
+
 function renderDay(idx) {
   activeDay.value = idx
-  const day = detail.value.result.days[idx]
+  const days = (detail.value && detail.value.result && detail.value.result.days) || []
+  const day = days[idx]
   if (!day) return
   const resolved = (day.items || []).filter(it => it.locationStatus === 'resolved')
   markers.value = resolved.map((it, i) => ({
@@ -292,40 +181,6 @@ function renderDay(idx) {
 
 function switchDay(idx) { renderDay(Number(idx)) }
 
-// ---------- 操作 ----------
-function cancelTask() {
-  if (canceling.value) return
-  Taro.showModal({
-    title: '取消生成',
-    content: '确定要取消这次行程生成吗？',
-    success: res => {
-      if (!res.confirm) return
-      canceling.value = true
-      api.trips.cancel(tripId.value).catch(() => {}).finally(() => { canceling.value = false })
-    }
-  })
-}
-
-// 失败重试：用原需求 + 新幂等键创建新任务（文档 4.5）
-function retry() {
-  if (!detail.value || !detail.value.request) return
-  if (submitting.value) return
-  submitting.value = true
-  api.trips.create(detail.value.request).then(res => {
-    tripId.value = res.tripId
-    Taro.setStorageSync('currentTripId', res.tripId)
-    phase.value = 'running'
-    percent.value = 0
-    stage.value = ''
-    message.value = ''
-    errorMsg.value = ''
-    lastEventId = ''
-    startWatch()
-  }).catch(e => {
-    Taro.showToast({ title: e.message || '创建失败', icon: 'none' })
-  }).finally(() => { submitting.value = false })
-}
-
 function goHome() {
   // 表单页已移出 tabBar，改用 navigateTo（tab 页才需要 switchTab）
   Taro.navigateTo({ url: '/pages/index/index' })
@@ -335,13 +190,6 @@ function goHome() {
 <style>
 .center-card { text-align: center; padding: 60rpx 40rpx; }
 .big-icon { font-size: 88rpx; margin-bottom: 16rpx; }
-.progress-wrap { display: flex; align-items: center; gap: 20rpx; margin: 32rpx 0; }
-.progress-bar {
-  flex: 1; height: 16rpx; background: #ece9e1; border-radius: 8rpx; overflow: hidden;
-}
-.progress-inner { height: 100%; background: #185FA5; border-radius: 8rpx; transition: width 0.4s; }
-.percent { font-size: 26rpx; color: #185FA5; min-width: 80rpx; }
-.btn.danger { background: #d9534f; margin-top: 24rpx; }
 .btn.ghost { background: #fff; color: #185FA5; border: 1rpx solid #185FA5; }
 .budget { display: flex; align-items: center; gap: 16rpx; margin: 16rpx 0 8rpx; }
 .budget-total { font-size: 36rpx; font-weight: 600; color: #185FA5; }

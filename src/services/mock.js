@@ -1,5 +1,9 @@
-// 本地模拟：后端没就绪时前端照常开发（config.USE_MOCK = true 时生效）
-// 对齐后端《功能与接口文档》v1.0：异步任务（queued→running→completed）+ SSE 事件流 + TripDetail 结构
+// 本地模拟：后端没就绪时前端照常开发
+// 是否走这里由 src/utils/config.js 的 MOCK（按模块）决定，未配置的模块回落到 USE_MOCK
+// 当前已连真实后端的模块：auth（登录）、trips（攻略）；仍走 mock：parse / poi / guide / event / ask
+// 对齐后端《微信小程序接口文档》攻略模块（2026-09-19）：
+//   POST /api/trip/generate（同步一次性返回 { tripId, result }）
+//   GET /api/trip/{id} · GET /api/trip/list（简单数组）· DELETE /api/trip/{id}
 import { buildMockDetail } from './mockDetail'
 
 // ---------- 讲解页用的模拟 POI / 讲稿（guide 接口后端待补） ----------
@@ -20,226 +24,144 @@ const GUIDE = {
   }
 }
 
-// ---------- 任务内存库 ----------
-const trips = new Map() // tripId -> { ...TripSummary 字段, request, error, subscribers, timer, detail }
-const idemKeys = new Map() // Idempotency-Key -> tripId
-
-const STAGES = [
-  { stage: 'validating', percent: 8, message: '正在校验你的需求' },
-  { stage: 'retrieving', percent: 24, message: '正在搜索攻略资料和知识库' },
-  { stage: 'generating', percent: 48, message: '正在生成结构化行程' },
-  { stage: 'verifying', percent: 62, message: '正在校验时间安排和事实信息' },
-  { stage: 'geocoding', percent: 76, message: '正在解析景点坐标' },
-  { stage: 'routing', percent: 86, message: '正在规划景点间真实路线' },
-  { stage: 'budgeting', percent: 94, message: '正在汇总预算' },
-  { stage: 'saving', percent: 100, message: '正在保存结果' }
-]
+// ---------- 行程内存库 ----------
+const trips = new Map() // id -> { ...详情字段, detail }
+let nextId = 1
 
 function now() {
   return new Date().toISOString()
 }
 
-function summaryOf(t) {
+// 预算自由文本 → 数字（"3000" / "3000元左右" / "三千" 都能取到 3000）
+function budgetToNumber(text) {
+  if (!text) return 0
+  const m = String(text).match(/\d+(?:\.\d+)?/)
+  return m ? parseFloat(m[0]) : 0
+}
+
+// 把新契约请求体规范成 mock 内部结构
+function normalizeRequest(data) {
+  data = data || {}
+  return {
+    destinationCity: data.city,
+    startDate: data.startDate,
+    days: data.days,
+    peopleCount: data.peopleCount || 1,
+    budgetText: data.budget || '',
+    budgetCny: budgetToNumber(data.budget),
+    preferences: data.preferences || [],
+    energyLevel: data.energyLevel || 'medium',
+    transportModes: data.transportation || ['transit'],
+    extraRequirements: data.extraRequirements || ''
+  }
+}
+
+function detailResponse(t) {
+  const r = t.request
   return {
     id: t.id,
-    title: t.title,
-    destinationCity: t.request.destinationCity,
-    startDate: t.request.startDate,
-    days: t.request.days,
-    status: t.status,
-    stage: t.stage,
-    progressPercent: t.progressPercent,
-    createdAt: t.createdAt,
-    updatedAt: now()
+    city: r.destinationCity,
+    startDate: r.startDate,
+    days: r.days,
+    peopleCount: r.peopleCount,
+    preferences: r.preferences.join(','),
+    budget: r.budgetText,
+    energyLevel: r.energyLevel,
+    transportation: r.transportModes.join(','),
+    extraRequirements: r.extraRequirements,
+    status: 'done',
+    result: t.detail,
+    createdAt: t.createdAt
   }
 }
 
-function notify(t, event, data) {
-  ;(t.subscribers || []).forEach(h => {
-    try {
-      h({ id: 'evt_' + Math.random().toString(36).slice(2, 8), event, data })
-    } catch (e) {
-      console.warn('[mock] 订阅者回调异常', e)
-    }
-  })
-}
-
-function advance(t) {
-  const next = STAGES.find(s => s.percent > t.progressPercent)
-  if (next) {
-    t.status = 'running'
-    t.stage = next.stage
-    t.progressPercent = next.percent
-    t.message = next.message
-    notify(t, 'progress', { tripId: t.id, status: t.status, stage: t.stage, progressPercent: t.progressPercent, message: t.message, occurredAt: now() })
-  }
-  if (t.progressPercent >= 100) {
-    clearInterval(t.timer)
-    t.status = 'completed'
-    t.stage = 'saving'
-    t.resultAvailable = true
-    t.detail = buildMockDetail(t.request)
-    notify(t, 'completed', { tripId: t.id, status: 'completed', occurredAt: now() })
-    t.subscribers = []
-  }
-}
-
-function startTask(t) {
-  t.status = 'running'
-  t.stage = 'validating'
-  t.progressPercent = 0
-  t.message = '已开始生成'
-  // 演示用：1.5 秒推进一个阶段（真实环境要几分钟）
-  t.timer = setInterval(() => {
-    if (t.status !== 'running') return
-    advance(t)
-  }, 1500)
-}
-
-// ---------- 请求分发 ----------
+// ---------- 请求分发（mock 返回的已经是拆包后的 data，api 层不再包装） ----------
 function mockRequest(path, method, data) {
   method = method || 'GET'
 
-  // 登录：POST /api/v1/auth/wechat-login
-  if (path.indexOf('/api/v1/auth/wechat-login') === 0) {
-    return delayer(() => ({ accessToken: 'mock_token_' + Date.now(), expiresIn: 7200, user: { id: 'usr_mock_001' } }))
+  // 登录：POST /api/auth/login（公开，body: { code }）
+  // 严格对齐后端文档 2026-09-20 的返回结构（含 nickname/avatarUrl 为 null 的真实情形）
+  if (path.indexOf('/api/auth/login') === 0) {
+    if (!data || !data.code) {
+      return delayer(() => { throw { code: 400, message: '缺少 code' } })
+    }
+    return delayer(() => ({
+      token: 'mock_token_' + Date.now(),
+      user: {
+        id: 1,
+        openid: 'mock_openid_001',
+        nickname: null,
+        avatarUrl: null
+      }
+    }))
   }
 
-  // 一句话解析（后端待补 /api/v1/parse）：简单关键词提取
-  if (path.indexOf('/api/v1/parse') === 0) {
+  // 一句话解析（前端创新点，后端待补 /api/parse）：关键词提取
+  if (path.indexOf('/api/parse') === 0) {
     return delayer(() => parseText(data && data.text))
   }
 
-  // 创建任务：POST /api/v1/trips
-  if (path === '/api/v1/trips' && method === 'POST') {
+  // POI / 讲解（后端待补）
+  if (path.indexOf('/api/poi/list') === 0) {
+    return delayer(() => POIS)
+  }
+  if (path.indexOf('/api/guide') === 0) {
+    const poiId = (path.match(/[?&]poiId=([^&]+)/) || [])[1]
+    return delayer(() => GUIDE[poiId] || { text: '这个景点的讲解内容准备中。', audioUrl: '', subtitles: [] })
+  }
+
+  // 埋点上报（后端待补）：本地直接吞掉，返回空体
+  if (path.indexOf('/api/event') === 0) {
+    return delayer(() => null, 0)
+  }
+
+  // 生成攻略：POST /api/trip/generate（同步，一次性返回）
+  if (path === '/api/trip/generate' && method === 'POST') {
     return delayer(() => {
+      const req = normalizeRequest(data)
+      if (!req.destinationCity) {
+        return Promise.reject({ code: 400, message: '城市为空' })
+      }
+      if (!(req.days >= 1 && req.days <= 15)) {
+        return Promise.reject({ code: 400, message: '天数须为 1–15' })
+      }
+      // 测试失败态：其他需求里写「触发失败」
+      if (req.extraRequirements.indexOf('触发失败') >= 0) {
+        return Promise.reject({ code: 502, message: 'AI 服务暂时不可用，请稍后重试' })
+      }
       const t = {
-        id: 'trp_' + Date.now().toString(36),
-        title: `${data.destinationCity} ${data.days} 天`,
-        request: JSON.parse(JSON.stringify(data)),
-        status: 'queued',
-        stage: null,
-        progressPercent: 0,
-        message: '已创建，等待执行',
-        error: null,
-        resultAvailable: false,
-        subscribers: [],
+        id: nextId++,
+        title: `${req.destinationCity} ${req.days}天`,
+        request: req,
+        detail: buildMockDetail(req),
         createdAt: now()
       }
-      if (data.extraRequirements && data.extraRequirements.indexOf('触发失败') >= 0) {
-        // 测试失败态：特殊需求里写「触发失败」
-        t.status = 'failed'
-        t.error = { code: 'UPSTREAM_UNAVAILABLE', message: '生成服务暂时不可用，请稍后重试', retryable: true }
-      } else {
-        setTimeout(() => startTask(t), 600)
-      }
       trips.set(t.id, t)
-      return { tripId: t.id, status: t.status, statusUrl: `/api/v1/trips/${t.id}/status`, eventsUrl: `/api/v1/trips/${t.id}/events` }
-    }, 300)
+      return { tripId: t.id, result: t.detail }
+    }, 2500) // 模拟 AI 生成耗时
   }
 
-  // 历史列表：GET /api/v1/trips
-  if (path.indexOf('/api/v1/trips?') === 0 || path === '/api/v1/trips') {
-    return delayer(() => {
-      const items = Array.from(trips.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map(summaryOf)
-      return { items, nextCursor: null }
-    })
+  // 历史列表：GET /api/trip/list（简单数组）
+  if (path === '/api/trip/list') {
+    return delayer(() =>
+      Array.from(trips.values())
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+        .map(t => ({ id: t.id, title: t.title, createdAt: t.createdAt }))
+    )
   }
 
-  const tripId = (path.match(/\/api\/v1\/trips\/([^/?]+)/) || [])[1]
+  // 详情 / 删除：/api/trip/{id}
+  const tripId = Number((path.match(/\/api\/trip\/([^/?]+)/) || [])[1])
   const t = trips.get(tripId)
+  if (!t) return Promise.reject({ code: 404, message: '行程不存在' })
 
-  if (!t) return Promise.reject({ code: 'TRIP_NOT_FOUND', message: '行程不存在或已删除' })
-
-  // 事件流订阅走 subscribe()，不会进这里
-  if (path.indexOf('/status') > 0) {
-    return delayer(() => ({
-      tripId: t.id,
-      status: t.status,
-      stage: t.stage,
-      progressPercent: t.progressPercent,
-      message: t.status === 'completed' ? '生成完成' : t.message,
-      resultAvailable: !!t.resultAvailable,
-      error: t.error,
-      updatedAt: now()
-    }))
-  }
-  if (path.indexOf('/cancel') > 0) {
-    return delayer(() => {
-      if (t.status === 'queued' || t.status === 'running') {
-        clearInterval(t.timer)
-        t.status = 'canceled'
-        notify(t, 'canceled', { tripId: t.id, status: 'canceled', occurredAt: now() })
-        t.subscribers = []
-      } else if (t.status === 'completed' || t.status === 'failed') {
-        return Promise.reject({ code: 'TRIP_NOT_CANCELABLE', message: '当前状态不允许取消' })
-      }
-      return { tripId: t.id, status: t.status }
-    })
-  }
   if (method === 'DELETE') {
     return delayer(() => {
       trips.delete(tripId)
       return null
     })
   }
-  // 详情：GET /api/v1/trips/{id}，返回 TripDetail 包装层（文档 5.3）
-  return delayer(() => {
-    if (t.status === 'queued' || t.status === 'running') {
-      return Promise.reject({ code: 'TRIP_NOT_READY', message: '结果尚未完成，请先查询状态接口' })
-    }
-    if (t.status === 'failed') {
-      return { id: t.id, title: t.title, status: 'failed', request: t.request, result: null, error: t.error, createdAt: t.createdAt, updatedAt: now() }
-    }
-    if (t.status === 'canceled') {
-      return { id: t.id, title: t.title, status: 'canceled', request: t.request, result: null, error: null, createdAt: t.createdAt, updatedAt: now() }
-    }
-    return {
-      id: t.id,
-      title: t.title,
-      status: 'completed',
-      stage: 'saving',
-      progressPercent: 100,
-      request: t.request,
-      result: t.detail,
-      error: null,
-      createdAt: t.createdAt,
-      updatedAt: now(),
-      completedAt: now()
-    }
-  })
-}
-
-// ---------- SSE 订阅模拟 ----------
-// 立即补发一条当前进度，之后每个阶段推进时推送（文档 6.3：重连可从当前状态恢复）
-function mockSubscribe(path, handlers) {
-  const tripId = (path.match(/\/api\/v1\/trips\/([^/?]+)/) || [])[1]
-  const t = trips.get(tripId)
-  if (!t) {
-    handlers.onError && handlers.onError({ code: 'TRIP_NOT_FOUND', message: '行程不存在或已删除' })
-    return { abort() {} }
-  }
-
-  const handler = ev => handlers.onEvent && handlers.onEvent(ev)
-  t.subscribers = t.subscribers || []
-  t.subscribers.push(handler)
-
-  // 已在终态：直接补发对应事件
-  if (t.status === 'completed') {
-    setTimeout(() => handler({ id: 'evt_done', event: 'completed', data: { tripId: t.id, status: 'completed', occurredAt: now() } }), 100)
-  } else if (t.status === 'failed') {
-    setTimeout(() => handler({ id: 'evt_fail', event: 'failed', data: { tripId: t.id, status: 'failed', error: t.error, occurredAt: now() } }), 100)
-  } else if (t.status === 'canceled') {
-    setTimeout(() => handler({ id: 'evt_cancel', event: 'canceled', data: { tripId: t.id, status: 'canceled', occurredAt: now() } }), 100)
-  } else {
-    setTimeout(() => notify(t, 'progress', { tripId: t.id, status: t.status, stage: t.stage, progressPercent: t.progressPercent, message: t.message, occurredAt: now() }), 100)
-  }
-
-  return {
-    abort() {
-      t.subscribers = (t.subscribers || []).filter(h => h !== handler)
-    }
-  }
+  return delayer(() => detailResponse(t))
 }
 
 // ---------- AI 追问流式模拟（chat 页用，后端待补 /api/ask） ----------
@@ -268,6 +190,44 @@ function streamAsk(handlers) {
   return { abort() { aborted = true; clearInterval(timer) } }
 }
 
+// ---------- 生成攻略（流式 mock）：模拟后端 SSE 事件节奏，行为与真实接口对齐 ----------
+// 协议（2026-09-20）：step=进度文案 · token=JSON 文本片段 · done={tripId} · error=错误信息
+// 与真实接口同契约：resolve({ tripId })；进度经 handlers.onStep、逐字文本经 handlers.onToken 送达
+function streamGenerate(payload, handlers) {
+  const steps = [
+    '正在理解你的需求…',
+    '正在搜索：景点与开放时间',
+    '正在搜索：本地美食推荐',
+    '正在规划每日行程路线',
+    '正在核算交通与预算…'
+  ]
+  return new Promise((resolve, reject) => {
+    let i = 0
+    // 先同步生成好行程数据（不通知页面），再按事件节奏演出：step → token 逐字 → done
+    mockRequest('/api/trip/generate', 'POST', payload || {})
+      .then(d => {
+        const text = JSON.stringify(d.result, null, 1)
+        let pos = 0
+        const timer = setInterval(() => {
+          if (i < steps.length) {
+            if (handlers.onStep) handlers.onStep(steps[i++])
+            return
+          }
+          if (pos < text.length) {
+            // 每帧吐 8~20 个字符，模拟大模型逐字输出
+            const n = 8 + Math.floor(Math.random() * 12)
+            if (handlers.onToken) handlers.onToken(text.slice(pos, pos + n))
+            pos += n
+            return
+          }
+          clearInterval(timer)
+          resolve({ tripId: d.tripId })
+        }, 60)
+      })
+      .catch(e => reject(e))
+  })
+}
+
 // ---------- 一句话解析（关键词提取，真实环境由大模型做） ----------
 function parseText(text) {
   text = text || ''
@@ -282,16 +242,18 @@ function parseText(text) {
   if (/自然|湖|山|湿地|公园/.test(text)) prefs.push('nature')
   if (/娃|小孩|亲子|儿童/.test(text)) prefs.push('family')
   if (/拍|打卡|照片/.test(text)) prefs.push('photography')
+  if (/夜|夜景|酒吧/.test(text)) prefs.push('nightlife')
+  if (/乐园|游乐/.test(text)) prefs.push('theme_park')
   const seniors = /父母|老人|长辈|爷爷|奶奶|腿脚/.test(text) ? 2 : 0
   return {
-    destinationCity: city,
+    city,
     startDate: parseDateFromText(text),
     days,
-    travelers: { adults: seniors ? 2 : 1, children: 0, seniors },
+    peopleCount: seniors ? 3 : 1,
     preferences: prefs.length ? prefs : ['culture'],
     energyLevel: /老人|父母|长辈|腿脚|轻松|不赶/.test(text) ? 'easy' : 'medium',
-    transportModes: ['transit', 'walking'],
-    budgetCny: parseBudgetFromText(text),
+    transportation: ['transit', 'walking'],
+    budget: parseBudgetFromText(text) ? String(parseBudgetFromText(text)) : '',
     extraRequirements: ''
   }
 }
@@ -376,7 +338,12 @@ function parseDateFromText(text) {
 }
 
 function delayer(fn, ms) {
-  return new Promise(resolve => setTimeout(() => resolve(fn()), ms || 200))
+  // fn 抛错时转为 reject，让 mock 的失败形态与真实接口一致（页面 catch 逻辑得以验证）
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try { resolve(fn()) } catch (e) { reject(e) }
+    }, ms || 200)
+  })
 }
 
-export { mockRequest as request, mockSubscribe as subscribe, streamAsk, POIS, GUIDE }
+export { mockRequest as request, streamAsk, streamGenerate, POIS, GUIDE }

@@ -1,6 +1,7 @@
 // 全局页面注册与窗口/tabBar 配置（对应原生 app.json）
 export default {
   pages: [
+    'pages/login/login',
     'pages/home/home',
     'pages/index/index',
     'pages/itinerary/itinerary',

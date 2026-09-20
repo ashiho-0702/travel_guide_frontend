@@ -49,7 +49,8 @@ function transitModeOf(request) {
 
 export function buildMockDetail(request) {
   const days = []
-  const hasBudget = typeof request.totalBudgetCny === 'number' && request.totalBudgetCny > 0
+  // 预算：mock 内部统一为数字（budgetCny，来自自由文本 budget 的提取）
+  const hasBudget = typeof request.budgetCny === 'number' && request.budgetCny > 0
 
   // 第一遍：按模板原价累计总费用
   let rawTotal = 0
@@ -58,7 +59,7 @@ export function buildMockDetail(request) {
     rawTotal += tpl.items.reduce((sum, it) => sum + it.estimatedCostCny, 0)
   }
   // 用户给了预算且原价超支：按比例压缩各项费用（门票免费项保持 0），让方案贴合预算
-  const factor = hasBudget && rawTotal > request.totalBudgetCny ? request.totalBudgetCny / rawTotal : 1
+  const factor = hasBudget && rawTotal > request.budgetCny ? request.budgetCny / rawTotal : 1
 
   let totalCost = 0
   for (let i = 0; i < request.days; i++) {
@@ -114,14 +115,14 @@ export function buildMockDetail(request) {
     destination: { city: request.destinationCity, province: request.destinationCity === '杭州' ? '浙江省' : '' },
     coordinateSystem: 'GCJ-02',
     overview: `为你安排了 ${request.destinationCity} ${request.days} 天行程，已按「${request.energyLevel}」体力档位控制每日节奏。` +
-      (hasBudget && factor < 1 ? `已按预算 ${request.totalBudgetCny} 元压缩各项开支。` : ''),
+      (hasBudget && factor < 1 ? `已按预算 ${request.budgetCny} 元压缩各项开支。` : ''),
     generatedAt: new Date().toISOString(),
     budgetSummary: {
       currency: 'CNY',
-      inputTotal: hasBudget ? request.totalBudgetCny : null,
+      inputTotal: hasBudget ? request.budgetCny : null,
       estimatedTotal: totalCost,
-      difference: hasBudget ? request.totalBudgetCny - totalCost : null,
-      status: hasBudget ? (totalCost <= request.totalBudgetCny ? 'within' : 'over') : 'unknown',
+      difference: hasBudget ? request.budgetCny - totalCost : null,
+      status: hasBudget ? (totalCost <= request.budgetCny ? 'within' : 'over') : 'unknown',
       isEstimate: true,
       categories: [
         { category: 'accommodation', label: '住宿', amount: Math.round(totalCost * 0.42) },
